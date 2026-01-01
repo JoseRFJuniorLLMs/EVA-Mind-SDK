@@ -1,0 +1,17 @@
+# Environment variables
+.env
+serviceAccountKey.json
+env_copy.txt
+
+# Binaries
+*.exe
+main
+# server
+server.exe
+
+# Credentials
+credentials/
+
+# Go stuff
+vendor/
+go.sum

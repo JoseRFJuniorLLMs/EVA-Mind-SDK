@@ -1,0 +1,360 @@
+package main
+
+import (
+	"bytes"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+)
+
+func main() {
+	fmt.Println("🧪 TESTE DE ANÁLISE GEMINI")
+	fmt.Println("=" + strings.Repeat("=", 50))
+
+	// 0. Carregar .env
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️ Arquivo .env não encontrado, usando variáveis do sistema")
+	} else {
+		fmt.Println("✅ Arquivo .env carregado")
+	}
+
+	// 1. Conectar ao banco
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("❌ DATABASE_URL não configurada")
+	}
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal("❌ Erro ao conectar banco:", err)
+	}
+	defer db.Close()
+
+	fmt.Println("✅ Conectado ao banco")
+
+	// 2. Pegar última transcrição
+	fmt.Println("\n📝 Buscando última transcrição...")
+
+	query := `
+		SELECT 
+			id,
+			idoso_id,
+			transcricao_completa,
+			LENGTH(transcricao_completa) as tamanho
+		FROM historico_ligacoes
+		WHERE transcricao_completa IS NOT NULL
+		  AND LENGTH(transcricao_completa) > 50
+		ORDER BY id DESC
+		LIMIT 1
+	`
+
+	var historyID, idosoID int64
+	var transcription string
+	var size int
+
+	err = db.QueryRow(query).Scan(&historyID, &idosoID, &transcription, &size)
+	if err != nil {
+		log.Fatal("❌ Erro ao buscar transcrição:", err)
+	}
+
+	fmt.Printf("✅ Transcrição #%d encontrada (idoso %d, %d chars)\n", historyID, idosoID, size)
+	fmt.Println("\n" + strings.Repeat("-", 60))
+	fmt.Println("📄 TRANSCRIÇÃO:")
+	fmt.Println(strings.Repeat("-", 60))
+
+	// Mostrar transcrição completa
+	if len(transcription) > 500 {
+		fmt.Println(transcription[:500] + "\n... (truncado)")
+	} else {
+		fmt.Println(transcription)
+	}
+
+	fmt.Println(strings.Repeat("-", 60))
+
+	// 3. Limpar transcrição
+	fmt.Println("\n🧹 Limpando transcrição...")
+	cleaned := cleanTranscription(transcription)
+	fmt.Printf("✅ Limpeza concluída: %d → %d chars\n", len(transcription), len(cleaned))
+
+	fmt.Println("\n" + strings.Repeat("-", 60))
+	fmt.Println("📄 TRANSCRIÇÃO LIMPA:")
+	fmt.Println(strings.Repeat("-", 60))
+	fmt.Println(cleaned)
+	fmt.Println(strings.Repeat("-", 60))
+
+	// 4. Listar modelos disponíveis primeiro
+	apiKey := os.Getenv("GOOGLE_API_KEY")
+	if apiKey == "" {
+		log.Fatal("❌ GOOGLE_API_KEY não configurada")
+	}
+
+	fmt.Println("\n📋 Listando modelos disponíveis...")
+	availableModels := listAvailableModels(apiKey)
+
+	if len(availableModels) == 0 {
+		log.Fatal("❌ Nenhum modelo disponível encontrado")
+	}
+
+	fmt.Printf("✅ Encontrados %d modelos disponíveis\n", len(availableModels))
+	fmt.Println(strings.Repeat("-", 60))
+	for i, model := range availableModels {
+		fmt.Printf("%d. %s\n", i+1, model)
+	}
+	fmt.Println(strings.Repeat("-", 60))
+
+	// 5. Testar apenas com gemini-2.5-flash (único com quota disponível)
+	modelsToTest := []string{"gemini-2.5-flash"}
+
+	for _, model := range modelsToTest {
+		fmt.Printf("\n\n🧠 TESTANDO MODELO: %s\n", model)
+		fmt.Println(strings.Repeat("=", 60))
+
+		result, err := analyzeWithModel(apiKey, model, cleaned)
+		if err != nil {
+			fmt.Printf("❌ ERRO: %v\n", err)
+			continue
+		}
+
+		fmt.Println("✅ SUCESSO!")
+		fmt.Println("\n📊 RESULTADO:")
+		fmt.Println(strings.Repeat("-", 60))
+
+		// Pretty print JSON
+		prettyJSON, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(prettyJSON))
+		fmt.Println(strings.Repeat("-", 60))
+	}
+
+	fmt.Println("\n\n✅ Teste concluído!")
+}
+
+func listAvailableModels(apiKey string) []string {
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1/models?key=%s", apiKey)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("⚠️ Erro ao listar modelos: %v", err)
+		return []string{}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		log.Printf("⚠️ Status %d: %s", resp.StatusCode, string(bodyBytes))
+		return []string{}
+	}
+
+	var result struct {
+		Models []struct {
+			Name                string   `json:"name"`
+			SupportedGeneration []string `json:"supportedGenerationMethods"`
+		} `json:"models"`
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		log.Printf("⚠️ Erro ao parsear: %v", err)
+		return []string{}
+	}
+
+	var available []string
+	for _, model := range result.Models {
+		// Verificar se suporta generateContent
+		for _, method := range model.SupportedGeneration {
+			if method == "generateContent" {
+				// Extrair só o nome do modelo (sem "models/" prefix)
+				modelName := strings.TrimPrefix(model.Name, "models/")
+				available = append(available, modelName)
+				break
+			}
+		}
+	}
+
+	return available
+}
+
+func cleanTranscription(text string) string {
+	lines := strings.Split(text, "\n")
+	var cleaned []string
+
+	currentSpeaker := ""
+	var currentText []string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Detectar linhas com timestamp: [HH:MM:SS] SPEAKER:
+		if strings.HasPrefix(line, "[") && strings.Contains(line, "]") {
+			// Extrair o que vem depois do timestamp
+			closeBracket := strings.Index(line, "]")
+			if closeBracket == -1 {
+				continue
+			}
+
+			timestamp := line[:closeBracket+1]
+			rest := strings.TrimSpace(line[closeBracket+1:])
+
+			// Verificar se é IDOSO: ou EVA:
+			var speaker string
+			var content string
+
+			if strings.HasPrefix(rest, "IDOSO:") {
+				speaker = "IDOSO"
+				content = strings.TrimSpace(rest[6:]) // Remove "IDOSO:"
+			} else if strings.HasPrefix(rest, "EVA:") {
+				speaker = "EVA"
+				content = strings.TrimSpace(rest[4:]) // Remove "EVA:"
+			} else {
+				continue
+			}
+
+			// Se mudou de speaker, salvar o anterior
+			if currentSpeaker != "" && currentSpeaker != speaker {
+				if len(currentText) > 0 {
+					cleaned = append(cleaned, strings.Join(currentText, " "))
+				}
+				currentText = []string{}
+			}
+
+			currentSpeaker = speaker
+
+			// Se há conteúdo nesta linha (não é só um título **Title**)
+			if content != "" && !strings.HasPrefix(content, "**") {
+				currentText = append(currentText, timestamp+" "+speaker+": "+content)
+			}
+
+		} else if currentSpeaker != "" {
+			// Linha de continuação
+			// Ignorar linhas que são títulos em negrito ou vazias
+			if strings.HasPrefix(line, "**") {
+				continue
+			}
+
+			// Adicionar ao texto corrente
+			currentText = append(currentText, line)
+		}
+	}
+
+	// Adicionar o último acumulado
+	if len(currentText) > 0 {
+		cleaned = append(cleaned, strings.Join(currentText, " "))
+	}
+
+	result := strings.Join(cleaned, "\n")
+
+	// Se não encontrou nada, retornar texto original truncado
+	if result == "" {
+		return text
+	}
+
+	return result
+}
+
+func analyzeWithModel(apiKey, model, transcription string) (map[string]interface{}, error) {
+	if transcription == "" {
+		return nil, fmt.Errorf("transcrição vazia, não há nada para analisar")
+	}
+
+	prompt := fmt.Sprintf(`Você é um médico. Analise esta conversa com um idoso:
+
+%s
+
+Responda APENAS com um JSON válido (sem markdown):
+{
+  "reported_pain": true/false,
+  "pain_location": "local ou vazio",
+  "pain_intensity": 0-10,
+  "mood_state": "feliz/triste/ansioso/neutro",
+  "urgency_level": "CRITICO/ALTO/MEDIO/BAIXO",
+  "summary": "resumo em 2 linhas"
+}`, transcription)
+
+	// USAR /v1 ao invés de /v1beta
+	url := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1/models/%s:generateContent?key=%s",
+		model,
+		apiKey,
+	)
+
+	payload := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]interface{}{
+					{"text": prompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":     0.1,
+			"maxOutputTokens": 2048,
+		},
+	}
+
+	jsonPayload, _ := json.Marshal(payload)
+
+	fmt.Printf("📤 Enviando request para: %s\n", model)
+	fmt.Printf("📝 Payload size: %d bytes\n", len(jsonPayload))
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return nil, fmt.Errorf("erro na requisição: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	fmt.Printf("📡 Status Code: %d\n", resp.StatusCode)
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Parse resposta
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return nil, fmt.Errorf("erro ao parsear JSON: %w", err)
+	}
+
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("resposta vazia")
+	}
+
+	responseText := result.Candidates[0].Content.Parts[0].Text
+	fmt.Printf("📥 Resposta: %d chars\n", len(responseText))
+
+	// Limpar markdown
+	responseText = strings.TrimSpace(responseText)
+	responseText = strings.TrimPrefix(responseText, "```json")
+	responseText = strings.TrimPrefix(responseText, "```")
+	responseText = strings.TrimSuffix(responseText, "```")
+	responseText = strings.TrimSpace(responseText)
+
+	// Parse análise
+	var analysis map[string]interface{}
+	if err := json.Unmarshal([]byte(responseText), &analysis); err != nil {
+		fmt.Printf("⚠️ Texto recebido: %s\n", responseText)
+		return nil, fmt.Errorf("erro ao parsear análise: %w", err)
+	}
+
+	return analysis, nil
+}

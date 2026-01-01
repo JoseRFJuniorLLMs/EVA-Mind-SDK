@@ -1,0 +1,14 @@
+// Adicionar no main.go após a inicialização do scheduler (linha ~140)
+
+import (
+	"eva-mind/internal/workers"
+)
+
+// Após: go sch.Start(context.Background())
+
+// Inicializar Workers de IA Avançada
+workerManager := workers.NewWorkerManager(db.GetConnection())
+workerManager.RegisterWorker(workers.NewPatternWorker(db.GetConnection()))
+workerManager.RegisterWorker(workers.NewPredictionWorker(db.GetConnection()))
+go workerManager.Start()
+addServerLog("✅ Workers de IA iniciados")
