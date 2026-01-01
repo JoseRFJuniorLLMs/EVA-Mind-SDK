@@ -359,7 +359,7 @@ func (s *SignalingServer) createSession(sessionID, cpf string, idosoID int64, co
 		return nil, err
 	}
 
-	instructions := buildInstructions(idosoID, s.db)
+	instructions := BuildInstructions(idosoID, s.db)
 	if err := geminiClient.SendSetup(instructions, gemini.GetDefaultTools()); err != nil {
 		cancel()
 		geminiClient.Close()
@@ -610,7 +610,7 @@ func (s *SignalingServer) sendError(conn *websocket.Conn, errMsg string) {
 	})
 }
 
-func buildInstructions(idosoID int64, db *sql.DB) string {
+func BuildInstructions(idosoID int64, db *sql.DB) string {
 	// Buscar dados do idoso
 	query := `
 		SELECT 

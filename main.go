@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"eva-mind/internal/gemini"
 	"eva-mind/internal/push"
 	"eva-mind/internal/scheduler"
+	"eva-mind/internal/signaling"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -165,7 +165,14 @@ func (s *SignalingServer) handleClientMessages(client *PCMClient) {
 			case "register":
 				s.registerClient(client, data)
 			case "start_call":
+				log.Printf("📞 ========================================")
+				log.Printf("📞 START_CALL RECEBIDO")
+				log.Printf("📞 CPF do cliente: %s", client.CPF)
+				log.Printf("📞 Session ID: %v", data["session_id"])
+				log.Printf("📞 ========================================")
+
 				if client.CPF == "" {
+					log.Printf("❌ ERRO: Cliente não registrado!")
 					s.sendJSON(client, map[string]string{"type": "error", "message": "Register first"})
 					continue
 				}
@@ -209,7 +216,10 @@ func (s *SignalingServer) registerClient(client *PCMClient, data map[string]inte
 	s.clients[idoso.CPF] = client
 	s.mu.Unlock()
 
-	s.sendJSON(client, map[string]string{"type": "registered"})
+	s.sendJSON(client, map[string]interface{}{
+		"type": "registered",
+		"cpf":  cpf,
+	})
 	log.Printf("✅ Cliente registrado: %s", cpf)
 }
 
@@ -225,7 +235,7 @@ func (s *SignalingServer) startGeminiSession(client *PCMClient) {
 
 	client.GeminiClient = gemClient
 
-	instructions := s.buildPrompt(client.IdosoID)
+	instructions := signaling.BuildInstructions(client.IdosoID, s.db.GetConnection())
 	tools := gemini.GetDefaultTools()
 
 	client.GeminiClient.SendSetup(instructions, tools)
@@ -234,16 +244,6 @@ func (s *SignalingServer) startGeminiSession(client *PCMClient) {
 	client.active = true
 	s.sendJSON(client, map[string]string{"type": "session_created", "status": "ready"})
 	log.Printf("✅ Sessão criada: %s", client.CPF)
-}
-
-func (s *SignalingServer) buildPrompt(idosoID int64) string {
-	var nome, tom string
-	s.db.GetConnection().QueryRow("SELECT nome, tom_voz FROM idosos WHERE id = $1", idosoID).Scan(&nome, &tom)
-
-	if tom == "" {
-		tom = "calmo e acolhedor"
-	}
-	return fmt.Sprintf("Você é a EVA, assistente virtual para idosos. Ajude o(a) %s. Use tom %s.", nome, tom)
 }
 
 func (s *SignalingServer) listenGemini(client *PCMClient) {
