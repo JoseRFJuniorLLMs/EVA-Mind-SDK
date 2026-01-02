@@ -293,3 +293,33 @@ func IsInvalidTokenError(err error) bool {
 	}
 	return false
 }
+
+// SendDataMessage envia uma mensagem silenciosa (data-only) para o dispositivo
+func (s *FirebaseService) SendDataMessage(deviceToken string, data map[string]string) error {
+	if deviceToken == "" {
+		return fmt.Errorf("device token is empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Garantir configuração Android para alta prioridade
+	androidConfig := &messaging.AndroidConfig{
+		Priority: "high",
+		TTL:      nil, // 0 = entrega imediata ou falha
+	}
+
+	message := &messaging.Message{
+		Token:   deviceToken,
+		Data:    data,
+		Android: androidConfig,
+	}
+
+	response, err := s.client.Send(ctx, message)
+	if err != nil {
+		return fmt.Errorf("error sending data message: %w", err)
+	}
+
+	log.Printf("📡 WebRTC Signal enviado para %s... ID: %s", deviceToken[:10], response)
+	return nil
+}

@@ -382,83 +382,49 @@
 </head>
 
 <body>
-    <div class="container">
-        <div class="header">
-            <h1><span class="heart-icon">💖</span> EVA - Assistente Cuidadora</h1>
-            <div class="tagline">Cuidando com carinho e tecnologia</div>
-        </div>
+    <div class="container"
+        style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh;">
+        <!-- Cabeçalho Oculto Visualmente mas mantido por carinho -->
+        <h1 style="display: none;">EVA - Assistente</h1>
 
-        <div class="card">
-            <p class="subtitle">🌸 Sistema de Conversação por Voz Otimizado 🌸</p>
+        <!-- Card Principal Centralizado -->
+        <div class="card"
+            style="width: 100%; max-width: 400px; text-align: center; border: none; box-shadow: none; background: transparent;">
 
-            <div class="alert">
-                <div class="alert-title">✨ Tecnologia de Ponta para Melhor Cuidado</div>
-                <div class="alert-text">
-                    🎵 Áudio PCM16 @ 16kHz | 🔄 Buffer de 200ms | 🎧 Reprodução suave @ 24kHz<br>
-                    <strong>🌐 Servidor será carregado automaticamente</strong>
-                </div>
+            <!-- Status apenas como ponto discreto -->
+            <div id="status" class="status-indicator"
+                style="width: 15px; height: 15px; border-radius: 50%; background-color: #ef4444; margin: 0 auto 30px auto; box-shadow: 0 0 10px rgba(239, 68, 68, 0.5); transition: all 0.5s;">
             </div>
+            <div id="statusText" style="display: none;">Offline</div>
 
-            <div style="text-align: center;">
-                <div id="status" class="status-badge status-offline">
-                    🔴 OFFLINE
-                </div>
-            </div>
-
-            <div class="controls">
-                <button id="btnStart" onclick="start()">
-                    💬 CONVERSAR COM EVA
+            <!-- Botões -->
+            <div class="controls" style="display: flex; flex-direction: column; gap: 20px;">
+                <button id="btnStart" onclick="start()"
+                    style="padding: 25px; border-radius: 50px; font-size: 20px; box-shadow: 0 10px 30px rgba(236, 72, 153, 0.3);">
+                    Falar com EVA 💖
                 </button>
-                <button id="btnStop" onclick="stop()">
-                    👋 ENCERRAR CONVERSA
+                <button id="btnStop" onclick="stop()"
+                    style="display: none; padding: 25px; border-radius: 50px; font-size: 20px; background: #ef4444;">
+                    Desligar
                 </button>
             </div>
 
-            <div class="info-grid">
-                <div class="info-item">
-                    <div class="info-label">👤 CPF</div>
-                    <div class="info-value">645.254.302-49</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">📊 Status</div>
-                    <div class="info-value" id="statusText">Aguardando</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">🎤 Sample Rate</div>
-                    <div class="info-value">16kHz</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">⏱️ Buffer</div>
-                    <div class="info-value">200ms</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">📤 Enviados</div>
-                    <div class="info-value" id="audioSent">0</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">📥 Recebidos</div>
-                    <div class="info-value" id="audioReceived">0</div>
-                </div>
+            <!-- Visualizer -->
+            <div class="visualizer" id="visualizer"
+                style="margin-top: 40px; border: none; background: transparent; box-shadow: none; height: 60px;">
+                <div class="bar" style="background: #db2777; height: 30px;"></div>
+                <div class="bar" style="background: #db2777; height: 40px; animation-delay: 0.1s"></div>
+                <div class="bar" style="background: #db2777; height: 50px; animation-delay: 0.2s"></div>
+                <div class="bar" style="background: #db2777; height: 40px; animation-delay: 0.3s"></div>
+                <div class="bar" style="background: #db2777; height: 30px; animation-delay: 0.4s"></div>
             </div>
 
-            <div class="visualizer" id="visualizer">
-                <div class="bar" style="animation-delay: 0s"></div>
-                <div class="bar" style="animation-delay: 0.1s"></div>
-                <div class="bar" style="animation-delay: 0.2s"></div>
-                <div class="bar" style="animation-delay: 0.3s"></div>
-                <div class="bar" style="animation-delay: 0.4s"></div>
-                <div class="bar" style="animation-delay: 0.4s"></div>
-                <div class="bar" style="animation-delay: 0.3s"></div>
-                <div class="bar" style="animation-delay: 0.2s"></div>
-                <div class="bar" style="animation-delay: 0.1s"></div>
-                <div class="bar" style="animation-delay: 0s"></div>
-                <span class="speaker-icon">🔊</span>
+            <!-- Elementos Ocultos (Mantidos no DOM para JS falhar graciosamente se depender deles) -->
+            <div style="display: none;">
+                <div id="audioSent">0</div>
+                <div id="audioReceived">0</div>
+                <div id="console"></div>
             </div>
-        </div>
-
-        <div class="card">
-            <h2 style="margin-bottom: 20px; color: #db2777; text-align: center;">📜 Console de Atividades</h2>
-            <div id="console"></div>
         </div>
     </div>
 
