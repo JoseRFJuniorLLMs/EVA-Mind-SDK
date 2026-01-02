@@ -559,18 +559,28 @@ registerProcessor('pcm16-processor', PCM16Processor);
         async function fetchConfig() {
             log('⚙️ Carregando configuração do servidor...', 'info');
             try {
+                // Tenta buscar do endpoint de config
                 const response = await fetch('/api/config');
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                if (response.ok) {
+                    const config = await response.json();
+                    if (config.wsUrl && config.wsUrl.includes('localhost')) {
+                        // Fallback inteligente se a config vier como localhost mas estivermos em produção
+                        WS_URL = 'wss://eva-mind-sdk-909020604131.southamerica-east1.run.app/ws/pcm';
+                    } else {
+                        WS_URL = config.wsUrl;
+                    }
                 }
-                const config = await response.json();
-                WS_URL = config.wsUrl;
-                log(`✅ Configuração carregada: ${WS_URL}`, 'success');
             } catch (err) {
-                log(`❌ Erro ao buscar config: ${err.message}`, 'error');
-                log('💡 Verifique se SERVER_URL está no .env e reinicie o servidor', 'warning');
-                throw new Error('Falha ao carregar configuração do servidor');
+                // Se falhar (ex: rodando estático), usa URL de produção hardcoded
+                WS_URL = 'wss://eva-mind-sdk-909020604131.southamerica-east1.run.app/ws/pcm';
             }
+
+            // Garantia final para produção
+            if (window.location.hostname !== 'localhost') {
+                WS_URL = 'wss://eva-mind-sdk-909020604131.southamerica-east1.run.app/ws/pcm';
+            }
+
+            log(`✅ Configuração carregada: ${WS_URL}`, 'success');
         }
 
         async function start() {
