@@ -583,7 +583,15 @@ func (s *SignalingServer) sendError(conn *websocket.Conn, errMsg string) {
 }
 
 func BuildInstructions(idosoID int64, db *sql.DB) string {
-	// Buscar dados do idoso
+	// 1. QUERY EXAUSTIVA: Recuperar TODOS os campos relevantes da tabela 'idosos'
+	// Esquema fornecido: id, nome, data_nascimento, telefone, cpf, foto_url, intro_audio_url,
+	// nivel_cognitivo, limitacoes_auditivas, usa_aparelho_auditivo, limitacoes_visuais,
+	// mobilidade, tom_voz, preferencia_horario_ligacao, timezone, ganho_audio_entrada,
+	// ganho_audio_saida, ambiente_ruidoso, familiar_principal, contato_emergencia,
+	// medico_responsavel, medicamentos_atuais, condicoes_medicas, sentimento,
+	// agendamentos_pendentes, notas_gerais, ativo, criado_em, atualizado_em,
+	// endereco, medicamentos_regulares, device_token, device_token_valido, device_token_atualizado_em
+
 	query := `
 		SELECT 
 			nome, 
@@ -591,14 +599,31 @@ func BuildInstructions(idosoID int64, db *sql.DB) string {
 			nivel_cognitivo, 
 			limitacoes_auditivas, 
 			usa_aparelho_auditivo, 
-			tom_voz
+			limitacoes_visuais,
+			mobilidade,
+			tom_voz,
+			preferencia_horario_ligacao,
+			ambiente_ruidoso,
+			familiar_principal, 
+			contato_emergencia, 
+			medico_responsavel,
+			medicamentos_atuais,
+			medicamentos_regulares,
+			condicoes_medicas,
+			sentimento,
+			notas_gerais,
+			endereco
 		FROM idosos 
 		WHERE id = $1
 	`
 
-	var nome, nivelCognitivo, tomVoz string
+	var nome, nivelCognitivo, tomVoz, mobilidade string
 	var idade int
-	var limitacoesAuditivas, usaAparelhoAuditivo bool
+	var limitacoesAuditivas, usaAparelhoAuditivo, ambienteRuidoso bool
+
+	// Campos que podem ser NULL (usando NullString para segurança)
+	var limitacoesVisuais, preferenciaHorario, familiarPrincipal, contatoEmergencia, medicoResponsavel sql.NullString
+	var medicamentosAtuais, medicamentosRegulares, condicoesMedicas, sentimento, notasGerais, endereco sql.NullString
 
 	err := db.QueryRow(query, idosoID).Scan(
 		&nome,
@@ -606,71 +631,114 @@ func BuildInstructions(idosoID int64, db *sql.DB) string {
 		&nivelCognitivo,
 		&limitacoesAuditivas,
 		&usaAparelhoAuditivo,
+		&limitacoesVisuais,
+		&mobilidade,
 		&tomVoz,
+		&preferenciaHorario,
+		&ambienteRuidoso,
+		&familiarPrincipal,
+		&contatoEmergencia,
+		&medicoResponsavel,
+		&medicamentosAtuais,
+		&medicamentosRegulares,
+		&condicoesMedicas,
+		&sentimento,
+		&notasGerais,
+		&endereco,
 	)
 
 	if err != nil {
-		// Fallback se der erro
-		return `Você é a EVA, assistente de saúde virtual.
-Fale em português brasileiro de forma carinhosa e clara.
-Respostas curtas: 1-2 frases.`
+		log.Printf("❌ [BuildInstructions] ERRO CRÍTICO ao buscar dados: %v", err)
+		// Fallback mínimo
+		return "Você é a EVA, assistente de saúde virtual. Fale em português de forma clara."
 	}
 
-	// Buscar template do banco
-	templateQuery := `
-		SELECT template
-		FROM prompt_templates
-		WHERE nome = 'eva_base_v2' AND ativo = true
-		LIMIT 1
-	`
+	// 🔍 DEBUG EXAUSTIVO DOS DADOS RECUPERADOS
+	log.Printf("📋 [DADOS PACIENTE] Nome: %s, Idade: %d", nome, idade)
+	log.Printf("   💊 Meds Atuais: %s", getString(medicamentosAtuais, "Nenhum"))
+	log.Printf("   💊 Meds Regulares: %s", getString(medicamentosRegulares, "Nenhum"))
+	log.Printf("   🏥 Condições: %s", getString(condicoesMedicas, "Nenhuma"))
 
+	// 2. Buscar Template Base
+	templateQuery := `SELECT template FROM prompt_templates WHERE nome = 'eva_base_v2' AND ativo = true LIMIT 1`
 	var template string
-	err = db.QueryRow(templateQuery).Scan(&template)
-	if err != nil {
-		// Fallback se não tiver template
-		return fmt.Sprintf(`Você é a EVA, assistente de saúde virtual.
-O idoso se chama %s, %d anos.
-Nível cognitivo: %s
-Tom de voz: %s
-Fale de forma %s, clara e pausada.`, nome, idade, nivelCognitivo, tomVoz, tomVoz)
+	if err := db.QueryRow(templateQuery).Scan(&template); err != nil {
+		log.Printf("⚠️ Template não encontrado, usando padrão.")
+		template = `Você é a EVA, assistente de saúde virtual para {{nome_idoso}}.`
 	}
 
-	// Substituir variáveis Mustache
-	instructions := strings.ReplaceAll(template, "{{nome_idoso}}", nome)
+	// 3. Montar "Dossiê do Paciente" (Texto Completo)
+	// Isso garante que NENHUMA informação seja perdida, independente do template
+
+	dossier := fmt.Sprintf("\n\n📍 --- FICHA COMPLETA DO PACIENTE (INFORMAÇÃO CONFIDENCIAL) ---\n")
+	dossier += fmt.Sprintf("NOME: %s\n", nome)
+	dossier += fmt.Sprintf("IDADE: %d anos\n", idade)
+	dossier += fmt.Sprintf("ENDEREÇO: %s\n", getString(endereco, "Não completado"))
+
+	dossier += "\n🏥 --- SAÚDE E CONDIÇÕES ---\n"
+	dossier += fmt.Sprintf("Nível Cognitivo: %s\n", nivelCognitivo)
+	dossier += fmt.Sprintf("Mobilidade: %s\n", mobilidade)
+	dossier += fmt.Sprintf("Limitações Auditivas: %v (Usa Aparelho: %v)\n", limitacoesAuditivas, usaAparelhoAuditivo)
+	dossier += fmt.Sprintf("Limitações Visuais: %s\n", getString(limitacoesVisuais, "Nenhuma"))
+	dossier += fmt.Sprintf("Condições Médicas: %s\n", getString(condicoesMedicas, "Nenhuma registrada"))
+
+	dossier += "\n💊 --- MEDICAMENTOS (IMPORTANTE) ---\n"
+	medsA := getString(medicamentosAtuais, "")
+	medsR := getString(medicamentosRegulares, "")
+	if medsA == "" && medsR == "" {
+		dossier += "Nenhum medicamento registrado no sistema.\n"
+	} else {
+		if medsA != "" {
+			dossier += fmt.Sprintf("Atuais: %s\n", medsA)
+		}
+		if medsR != "" {
+			dossier += fmt.Sprintf("Regulares: %s\n", medsR)
+		}
+		dossier += "INSTRUCÃO: Se o paciente perguntar o que deve tomar, consulte esta lista.\n"
+	}
+
+	dossier += "\n📞 --- REDE DE APOIO ---\n"
+	dossier += fmt.Sprintf("Familiar: %s\n", getString(familiarPrincipal, "Não informado"))
+	dossier += fmt.Sprintf("Emergência: %s\n", getString(contatoEmergencia, "Não informado"))
+	dossier += fmt.Sprintf("Médico: %s\n", getString(medicoResponsavel, "Não informado"))
+
+	dossier += "\n📝 --- OUTRAS NOTAS ---\n"
+	dossier += fmt.Sprintf("Notas Gerais: %s\n", getString(notasGerais, ""))
+	dossier += fmt.Sprintf("Preferência Horário: %s\n", getString(preferenciaHorario, "Indiferente"))
+	dossier += fmt.Sprintf("Ambiente Ruidoso: %v\n", ambienteRuidoso)
+	dossier += fmt.Sprintf("Tom de Voz Ideal: %s\n", tomVoz)
+	dossier += "--------------------------------------------------------\n"
+
+	// 4. Substituições no Template (para manter compatibilidade com tags existentes)
+	instructions := template
+	instructions = strings.ReplaceAll(instructions, "{{nome_idoso}}", nome)
 	instructions = strings.ReplaceAll(instructions, "{{idade}}", fmt.Sprintf("%d", idade))
 	instructions = strings.ReplaceAll(instructions, "{{nivel_cognitivo}}", nivelCognitivo)
 	instructions = strings.ReplaceAll(instructions, "{{tom_voz}}", tomVoz)
 
-	// Processar condicionais
-	if limitacoesAuditivas {
-		instructions = strings.ReplaceAll(instructions, "{{#limitacoes_auditivas}}", "")
-		instructions = strings.ReplaceAll(instructions, "{{/limitacoes_auditivas}}", "")
-	} else {
-		start := strings.Index(instructions, "{{#limitacoes_auditivas}}")
-		end := strings.Index(instructions, "{{/limitacoes_auditivas}}")
-		if start != -1 && end != -1 {
-			instructions = instructions[:start] + instructions[end+len("{{/limitacoes_auditivas}}"):]
-		}
+	// Tags de dados (caso o template as use)
+	instructions = strings.ReplaceAll(instructions, "{{medicamentos}}", medsA+" "+medsR)
+	instructions = strings.ReplaceAll(instructions, "{{condicoes_medicas}}", getString(condicoesMedicas, ""))
+
+	// Limpar tags condicionais não usadas
+	tags := []string{"{{#limitacoes_auditivas}}", "{{/limitacoes_auditivas}}", "{{#usa_aparelho_auditivo}}", "{{/usa_aparelho_auditivo}}", "{{#primeira_interacao}}", "{{/primeira_interacao}}", "{{^primeira_interacao}}", "{{taxa_adesao}}"}
+	for _, tag := range tags {
+		instructions = strings.ReplaceAll(instructions, tag, "")
 	}
 
-	if usaAparelhoAuditivo {
-		instructions = strings.ReplaceAll(instructions, "{{#usa_aparelho_auditivo}}", "")
-		instructions = strings.ReplaceAll(instructions, "{{/usa_aparelho_auditivo}}", "")
-	} else {
-		start := strings.Index(instructions, "{{#usa_aparelho_auditivo}}")
-		end := strings.Index(instructions, "{{/usa_aparelho_auditivo}}")
-		if start != -1 && end != -1 {
-			instructions = instructions[:start] + instructions[end+len("{{/usa_aparelho_auditivo}}"):]
-		}
+	// 5. ANEXAR DOSSIÊ AO FINAL (Garantia Absoluta)
+	finalInstructions := instructions + dossier
+
+	log.Printf("✅ [BuildInstructions] Instruções finais geradas (%d chars)", len(finalInstructions))
+	return finalInstructions
+}
+
+// Helper seguro para NullString
+func getString(ns sql.NullString, def string) string {
+	if ns.Valid {
+		return ns.String
 	}
-
-	// Limpar variáveis não usadas
-	instructions = strings.ReplaceAll(instructions, "{{#primeira_interacao}}", "")
-	instructions = strings.ReplaceAll(instructions, "{{/primeira_interacao}}", "")
-	instructions = strings.ReplaceAll(instructions, "{{^primeira_interacao}}", "")
-	instructions = strings.ReplaceAll(instructions, "{{taxa_adesao}}", "85")
-
-	return instructions
+	return def
 }
 
 func generateSessionID() string {
