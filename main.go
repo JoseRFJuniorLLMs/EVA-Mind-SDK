@@ -241,10 +241,9 @@ func (s *SignalingServer) registerClient(client *PCMClient, data map[string]inte
 	s.mu.Unlock()
 
 	log.Printf("✅ Cliente registrado: %s (ID: %d)", idoso.CPF, idoso.ID)
-
-	// ✅ CRIAR SESSÃO GEMINI IMEDIATAMENTE (não esperar start_call)
 	log.Printf("🤖 Iniciando Gemini para %s", client.CPF)
 
+	// ✅ Criar cliente Gemini
 	gemClient, err := gemini.NewClient(client.ctx, s.cfg)
 	if err != nil {
 		log.Printf("❌ Gemini error: %v", err)
@@ -254,10 +253,33 @@ func (s *SignalingServer) registerClient(client *PCMClient, data map[string]inte
 
 	client.GeminiClient = gemClient
 
+	// ✅ CRÍTICO: Configurar callbacks ANTES de enviar setup
+	log.Printf("🎯 Configurando callbacks de áudio...")
+
+	gemClient.SetCallbacks(
+		// 🔊 Callback quando Gemini enviar áudio
+		func(audioBytes []byte) {
+			log.Printf("🔊 [CALLBACK] Áudio do Gemini: %d bytes", len(audioBytes))
+
+			// ✅ Enviar diretamente para o cliente
+			select {
+			case client.SendCh <- audioBytes:
+				log.Printf("✅ Áudio enfileirado para %s", client.CPF)
+			default:
+				log.Printf("⚠️ Canal cheio, dropando áudio para %s", client.CPF)
+			}
+		},
+		// 🛠️ Callback de tool calls
+		func(name string, args map[string]interface{}) map[string]interface{} {
+			log.Printf("🔧 Tool call: %s", name)
+			return s.handleToolCall(client, name, args)
+		},
+	)
+
+	// ✅ Enviar instruções e tools
 	instructions := signaling.BuildInstructions(client.IdosoID, s.db.GetConnection())
 	tools := gemini.GetDefaultTools()
 
-	// Usar novo método StartSession do SDK
 	err = client.GeminiClient.StartSession(instructions, tools)
 	if err != nil {
 		log.Printf("❌ Erro ao iniciar sessão: %v", err)
@@ -265,15 +287,22 @@ func (s *SignalingServer) registerClient(client *PCMClient, data map[string]inte
 		return
 	}
 
-	go s.listenGemini(client)
+	// ✅ Iniciar loop de leitura de respostas
+	go func() {
+		log.Printf("👂 HandleResponses iniciado para %s", client.CPF)
+		err := client.GeminiClient.HandleResponses(client.ctx)
+		if err != nil {
+			log.Printf("⚠️ HandleResponses finalizado para %s: %v", client.CPF, err)
+		}
+		client.active = false
+	}()
 
 	client.active = true
 
-	// Responder com status ready (sessão já criada)
 	s.sendJSON(client, map[string]interface{}{
 		"type":   "registered",
 		"cpf":    idoso.CPF,
-		"status": "ready", // Indica que pode enviar áudio
+		"status": "ready",
 	})
 
 	log.Printf("✅ Sessão completa para: %s", client.CPF)

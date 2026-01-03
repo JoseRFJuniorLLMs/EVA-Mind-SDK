@@ -3,8 +3,10 @@ package gemini
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"eva-mind/internal/config"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -114,27 +116,61 @@ func (c *Client) ReadResponse() (map[string]interface{}, error) {
 
 // HandleResponses processa o loop de mensagens (exigido pelo main.go:318)
 func (c *Client) HandleResponses(ctx context.Context) error {
+	log.Printf("👂 HandleResponses: loop iniciado")
+
 	for {
 		select {
 		case <-ctx.Done():
+			log.Printf("🛑 HandleResponses: contexto cancelado")
 			return ctx.Err()
 		default:
 			resp, err := c.ReadResponse()
 			if err != nil {
+				log.Printf("❌ Erro ao ler resposta: %v", err)
 				return err
 			}
 
-			// Processar Conteúdo (Áudio/Texto)
+			// ✅ DEBUG: Mostrar estrutura da resposta
+			if respBytes, _ := json.Marshal(resp); len(respBytes) > 0 {
+				preview := string(respBytes)
+				if len(preview) > 200 {
+					preview = preview[:200] + "..."
+				}
+				log.Printf("📦 Resposta Gemini: %s", preview)
+			}
+
+			// ✅ Processar áudio
 			if serverContent, ok := resp["serverContent"].(map[string]interface{}); ok {
 				if modelTurn, ok := serverContent["modelTurn"].(map[string]interface{}); ok {
 					if parts, ok := modelTurn["parts"].([]interface{}); ok {
+						log.Printf("📋 Processando %d parts", len(parts))
+
 						for _, p := range parts {
-							part := p.(map[string]interface{})
+							part, ok := p.(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							// ✅ Procurar por inlineData (áudio)
 							if inlineData, ok := part["inlineData"].(map[string]interface{}); ok {
-								audioB64 := inlineData["data"].(string)
-								audioBytes, _ := base64.StdEncoding.DecodeString(audioB64)
-								if c.onAudio != nil {
-									c.onAudio(audioBytes)
+								log.Printf("🎵 inlineData encontrado")
+
+								if audioB64, ok := inlineData["data"].(string); ok {
+									audioBytes, err := base64.StdEncoding.DecodeString(audioB64)
+									if err != nil {
+										log.Printf("❌ Erro ao decodificar base64: %v", err)
+										continue
+									}
+
+									log.Printf("✅ Áudio decodificado: %d bytes", len(audioBytes))
+
+									// ✅ CHAMAR CALLBACK
+									if c.onAudio != nil {
+										log.Printf("📞 Chamando callback onAudio...")
+										c.onAudio(audioBytes)
+									} else {
+										log.Printf("⚠️ CALLBACK onAudio NÃO CONFIGURADO!")
+									}
 								}
 							}
 						}
@@ -142,8 +178,9 @@ func (c *Client) HandleResponses(ctx context.Context) error {
 				}
 			}
 
-			// Processar Ferramentas
+			// ✅ Processar tool calls
 			if toolCall, ok := resp["toolCall"].(map[string]interface{}); ok {
+				log.Printf("🔧 Tool call detectado")
 				c.handleToolCalls(toolCall)
 			}
 		}
