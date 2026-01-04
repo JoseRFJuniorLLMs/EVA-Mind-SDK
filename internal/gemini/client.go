@@ -142,6 +142,15 @@ func (c *Client) HandleResponses(ctx context.Context) error {
 				return err
 			}
 
+			// ✅ DEBUG: Mostrar TODAS as respostas do Gemini
+			if respBytes, _ := json.Marshal(resp); len(respBytes) > 0 {
+				preview := string(respBytes)
+				if len(preview) > 300 {
+					preview = preview[:300] + "..."
+				}
+				log.Printf("📦 Gemini Response: %s", preview)
+			}
+
 			// ✅ Verificar setupComplete
 			if setupComplete, ok := resp["setupComplete"].(bool); ok && setupComplete {
 				log.Printf("✅ Gemini Setup Complete - Pronto para receber áudio!")
@@ -158,7 +167,7 @@ func (c *Client) HandleResponses(ctx context.Context) error {
 			if serverContent, ok := resp["serverContent"].(map[string]interface{}); ok {
 				if modelTurn, ok := serverContent["modelTurn"].(map[string]interface{}); ok {
 					if parts, ok := modelTurn["parts"].([]interface{}); ok {
-						
+
 						for _, p := range parts {
 							part, ok := p.(map[string]interface{})
 							if !ok {
@@ -167,7 +176,7 @@ func (c *Client) HandleResponses(ctx context.Context) error {
 
 							// ✅ Procurar por inlineData (áudio)
 							if inlineData, ok := part["inlineData"].(map[string]interface{}); ok {
-								
+
 								if audioB64, ok := inlineData["data"].(string); ok {
 									audioBytes, err := base64.StdEncoding.DecodeString(audioB64)
 									if err != nil {
