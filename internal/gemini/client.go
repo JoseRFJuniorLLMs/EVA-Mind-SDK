@@ -52,7 +52,8 @@ func (c *Client) SetCallbacks(onAudio AudioCallback, onToolCall ToolCallCallback
 
 // SendSetup envia configuração inicial
 func (c *Client) SendSetup(instructions string, tools []interface{}) error {
-	// ✅ FIX: Adicionar sample_rate_hertz explícito para OUTPUT
+	// ✅ CORRETO: Gemini SEMPRE retorna 24kHz quando usa response_modalities: ["AUDIO"]
+	// NÃO existe campo sample_rate_hertz na API!
 	setupMsg := map[string]interface{}{
 		"setup": map[string]interface{}{
 			"model": fmt.Sprintf("models/%s", c.cfg.ModelID),
@@ -64,8 +65,8 @@ func (c *Client) SendSetup(instructions string, tools []interface{}) error {
 							"voice_name": "Aoede",
 						},
 					},
-					// ✅ CRÍTICO: Garantir que Gemini envie áudio em 24kHz
-					"sample_rate_hertz": 24000,
+					// ❌ REMOVIDO: "sample_rate_hertz": 24000
+					// A API não suporta esse campo! Gemini usa 24kHz por padrão.
 				},
 			},
 			"system_instruction": map[string]interface{}{
@@ -80,7 +81,7 @@ func (c *Client) SendSetup(instructions string, tools []interface{}) error {
 	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	log.Printf("🔧 CONFIGURANDO GEMINI")
 	log.Printf("🎙️ Input: 16kHz PCM16 Mono")
-	log.Printf("🔊 Output: 24kHz PCM16 Mono")
+	log.Printf("🔊 Output: 24kHz PCM16 Mono (padrão Gemini)")
 	log.Printf("🗣️ Voz: Aoede")
 	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
@@ -141,26 +142,23 @@ func (c *Client) HandleResponses(ctx context.Context) error {
 				return err
 			}
 
-			// Debug da resposta (apenas em dev)
-			if respBytes, _ := json.Marshal(resp); len(respBytes) > 0 {
-				preview := string(respBytes)
-				if len(preview) > 200 {
-					preview = preview[:200] + "..."
-				}
-				// Log apenas setupComplete e erros
-				if _, ok := resp["setupComplete"]; ok {
-					log.Printf("✅ Gemini Setup Complete")
-				}
-				if errMsg, ok := resp["error"]; ok {
-					log.Printf("❌ Gemini Error: %v", errMsg)
-				}
+			// ✅ Verificar setupComplete
+			if setupComplete, ok := resp["setupComplete"].(bool); ok && setupComplete {
+				log.Printf("✅ Gemini Setup Complete - Pronto para receber áudio!")
+				continue
+			}
+
+			// Debug de erros
+			if errMsg, ok := resp["error"]; ok {
+				log.Printf("❌ Gemini Error: %v", errMsg)
+				continue
 			}
 
 			// ✅ Processar áudio
 			if serverContent, ok := resp["serverContent"].(map[string]interface{}); ok {
 				if modelTurn, ok := serverContent["modelTurn"].(map[string]interface{}); ok {
 					if parts, ok := modelTurn["parts"].([]interface{}); ok {
-
+						
 						for _, p := range parts {
 							part, ok := p.(map[string]interface{})
 							if !ok {
@@ -169,7 +167,7 @@ func (c *Client) HandleResponses(ctx context.Context) error {
 
 							// ✅ Procurar por inlineData (áudio)
 							if inlineData, ok := part["inlineData"].(map[string]interface{}); ok {
-
+								
 								if audioB64, ok := inlineData["data"].(string); ok {
 									audioBytes, err := base64.StdEncoding.DecodeString(audioB64)
 									if err != nil {
@@ -177,7 +175,7 @@ func (c *Client) HandleResponses(ctx context.Context) error {
 										continue
 									}
 
-									log.Printf("✅ Áudio decodificado: %d bytes", len(audioBytes))
+									log.Printf("✅ Áudio decodificado: %d bytes @ 24kHz", len(audioBytes))
 
 									// ✅ CHAMAR CALLBACK
 									if c.onAudio != nil {
