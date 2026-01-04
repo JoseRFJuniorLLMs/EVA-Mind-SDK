@@ -82,7 +82,7 @@ func main() {
 
 	logger.Init(logLevel, environment)
 	appLog := logger.Logger
-	appLog.Info().Msg("🚀 EVA-Mind 2026-1")
+	appLog.Info().Msg("🚀 EVA-Mind 2026-v2")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -222,9 +222,9 @@ func (s *SignalingServer) handleClientMessages(client *PCMClient) {
 		if msgType == websocket.BinaryMessage && client.active {
 			client.audioCount++
 
-			if client.audioCount%50 == 0 {
-				log.Printf("🎤 [%s] Áudio chunk #%d (%d bytes)", client.CPF, client.audioCount, len(message))
-			}
+			// if client.audioCount%50 == 0 {
+			// 	log.Printf("🎤 [%s] Áudio chunk #%d (%d bytes)", client.CPF, client.audioCount, len(message))
+			// }
 
 			if client.GeminiClient != nil {
 				client.GeminiClient.SendAudio(message)
@@ -279,12 +279,12 @@ func (s *SignalingServer) registerClient(client *PCMClient, data map[string]inte
 	gemClient.SetCallbacks(
 		// 📊 Callback quando Gemini enviar áudio
 		func(audioBytes []byte) {
-			log.Printf("📊 [CALLBACK] Áudio do Gemini: %d bytes", len(audioBytes))
+			// log.Printf("📊 [CALLBACK] Áudio do Gemini: %d bytes", len(audioBytes))
 
 			select {
 			case client.SendCh <- audioBytes:
 				if client.audioCount%50 == 0 {
-					log.Printf("✅ Áudio enfileirado para %s", client.CPF)
+					// log.Printf("✅ Áudio enfileirado para %s", client.CPF)
 				}
 			default:
 				log.Printf("⚠️ Canal cheio, dropando áudio para %s", client.CPF)
@@ -461,9 +461,9 @@ func (s *SignalingServer) handleClientSend(client *PCMClient) {
 			}
 
 			// Debug DETALHADO: Loga a cada 10 pacotes
-			if sentCount%10 == 0 {
-				log.Printf("� [DEBUG-BIN] Enviado %d bytes (Chunk #%d). Status: OK", len(audio), sentCount)
-			}
+			// if sentCount%10 == 0 {
+			// 	log.Printf(" [DEBUG-BIN] Enviado %d bytes (Chunk #%d). Status: OK", len(audio), sentCount)
+			// }
 		}
 	}
 }
