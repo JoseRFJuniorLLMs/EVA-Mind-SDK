@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -322,7 +324,7 @@ func (s *SignalingServer) handleGeminiResponse(session *WebSocketSession, respon
 	}
 }
 
-// ✅ NOVO: Sistema de buffer inteligente para áudio
+// ✅ Sistema de buffer inteligente para áudio PCM16
 func (s *SignalingServer) bufferAudio(session *WebSocketSession, audioData []byte) {
 	session.audioMutex.Lock()
 	defer session.audioMutex.Unlock()
@@ -330,7 +332,7 @@ func (s *SignalingServer) bufferAudio(session *WebSocketSession, audioData []byt
 	// Acumular no buffer
 	session.audioBuffer = append(session.audioBuffer, audioData...)
 
-	// ✅ CRÍTICO: Tamanho mínimo do buffer = 9600 bytes (400ms @ 24kHz)
+	// ✅ CRÍTICO: Tamanho mínimo do buffer = 9600 bytes (400ms @ 24kHz PCM16)
 	const MIN_BUFFER_SIZE = 9600
 
 	// Enviar quando buffer atingir tamanho mínimo
@@ -338,13 +340,13 @@ func (s *SignalingServer) bufferAudio(session *WebSocketSession, audioData []byt
 		chunk := make([]byte, len(session.audioBuffer))
 		copy(chunk, session.audioBuffer)
 
-		log.Printf("🎶 [AUDIO] Enviando chunk buffered de %d bytes para cliente", len(chunk))
+		log.Printf("🎶 [AUDIO] Enviando %d bytes PCM16 @ 24kHz para cliente", len(chunk))
 
 		err := session.WSConn.WriteMessage(websocket.BinaryMessage, chunk)
 		if err != nil {
 			log.Printf("❌ [AUDIO] Erro ao enviar: %v", err)
 		} else {
-			log.Printf("✅ [AUDIO] Chunk enviado com sucesso")
+			log.Printf("✅ [AUDIO] PCM16 enviado com sucesso")
 		}
 
 		// Limpar buffer após envio
@@ -354,13 +356,49 @@ func (s *SignalingServer) bufferAudio(session *WebSocketSession, audioData []byt
 	}
 }
 
-// ✅ NOVO: Enviar buffer restante antes de fechar sessão
+// ✅ NOVA FUNÇÃO: Converte PCM16 (Int16) → Float32
+func convertPCM16ToFloat32(pcm16Data []byte) []byte {
+	// Validar tamanho (deve ser par)
+	if len(pcm16Data)%2 != 0 {
+		log.Printf("⚠️ [CONVERSÃO] Tamanho ímpar: %d bytes, truncando", len(pcm16Data))
+		pcm16Data = pcm16Data[:len(pcm16Data)-1]
+	}
+
+	pcm16Count := len(pcm16Data) / 2
+	float32Data := make([]byte, pcm16Count*4)
+
+	// ✅ DEBUG: Analisar primeiros samples
+	if pcm16Count > 0 {
+		firstSample := int16(binary.LittleEndian.Uint16(pcm16Data[0:2]))
+		firstFloat := float32(firstSample) / 32768.0
+		log.Printf("🔍 [CONVERSÃO] Primeiro sample: PCM16=%d → Float32=%.6f", firstSample, firstFloat)
+	}
+
+	for i := 0; i < pcm16Count; i++ {
+		// Decodificar Int16 (Little Endian)
+		sample := int16(binary.LittleEndian.Uint16(pcm16Data[i*2:]))
+
+		// Converter para Float32 (-1.0 a +1.0) - Divisão simétrica
+		floatVal := float32(sample) / 32768.0
+
+		// Codificar Float32 (Little Endian)
+		bits := math.Float32bits(floatVal)
+		binary.LittleEndian.PutUint32(float32Data[i*4:], bits)
+	}
+
+	log.Printf("✅ [CONVERSÃO] %d samples convertidos (%d bytes PCM16 → %d bytes Float32)",
+		pcm16Count, len(pcm16Data), len(float32Data))
+
+	return float32Data
+}
+
+// ✅ Enviar buffer restante antes de fechar sessão
 func (s *SignalingServer) flushAudioBuffer(session *WebSocketSession) {
 	session.audioMutex.Lock()
 	defer session.audioMutex.Unlock()
 
 	if len(session.audioBuffer) > 0 {
-		log.Printf("🔊 [AUDIO] Enviando buffer restante: %d bytes", len(session.audioBuffer))
+		log.Printf("🔊 [AUDIO] Enviando buffer restante: %d bytes PCM16", len(session.audioBuffer))
 		session.WSConn.WriteMessage(websocket.BinaryMessage, session.audioBuffer)
 		session.audioBuffer = nil
 	}

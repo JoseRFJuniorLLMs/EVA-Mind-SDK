@@ -266,8 +266,8 @@
     <div class="container">
         <h1>🔬 EVA DEBUG MONITOR</h1>
         <div class="subtitle">
-            ✨ Otimizado: 24kHz Sample Rate | Buffer 9600 | Jitter Control | PCM16 Corrigido
-            <span class="optimization-badge">v2.0</span>
+            ✨ Otimizado: 24kHz | Buffer 9600 | Jitter | Float32 do Servidor
+            <span class="optimization-badge">v2.1</span>
         </div>
 
         <div class="section">
@@ -484,9 +484,9 @@
             }
         }
 
-        // ✅ ANÁLISE DE QUALIDADE
-        function analyzeAudioQuality(pcm16) {
-            const samples = new Int16Array(pcm16);
+        // ✅ ANÁLISE DE QUALIDADE - PCM16
+        function analyzeAudioQuality(pcm16Buffer) {
+            const samples = new Int16Array(pcm16Buffer);
             let sum = 0;
             let max = 0;
 
@@ -631,21 +631,21 @@
             log('✅ Sistema de áudio COMPLETO!', 'success');
         }
 
-        // ✅ AUDIO PLAYBACK COM JITTER BUFFER
+        // ✅ AUDIO PLAYBACK - RECEBE PCM16 @ 24kHz DO SERVIDOR
         async function playAudio(pcm16Buffer) {
             if (!playbackContext) {
-                playbackContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE }); // ✅ 24kHz
+                playbackContext = new AudioContext({ sampleRate: 24000 }); // ✅ 24kHz (Gemini output)
                 await playbackContext.resume();
                 playbackScheduledTime = playbackContext.currentTime;
-                log(`🔊 Playback @ ${playbackContext.sampleRate}Hz`, 'info');
+                log(`🔊 Playback @ ${playbackContext.sampleRate}Hz (PCM16→Float32)`, 'info');
             }
 
+            // ✅ CONVERTER PCM16 → Float32 (servidor envia PCM16 @ 24kHz)
             const pcm16 = new Int16Array(pcm16Buffer);
             const float32 = new Float32Array(pcm16.length);
 
-            // ✅ Conversão PCM16→Float32 corrigida (divisão simétrica)
             for (let i = 0; i < pcm16.length; i++) {
-                float32[i] = pcm16[i] / 32768.0;
+                float32[i] = pcm16[i] / 32768.0; // Divisão simétrica
             }
 
             const audioBuffer = playbackContext.createBuffer(1, float32.length, playbackContext.sampleRate);
@@ -773,7 +773,7 @@
         updateUI();
 
         log('🔬 Debug Monitor OTIMIZADO inicializado', 'success');
-        log('✨ Melhorias: 24kHz | Buffer 9600 | Jitter | PCM16 corrigido', 'info');
+        log('✨ Servidor envia Float32 direto | 24kHz | Buffer 9600 | Jitter', 'info');
     </script>
 </body>
 
