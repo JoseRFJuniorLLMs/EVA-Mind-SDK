@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVA Debug Monitor - Otimizado</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #1a0a1f 0%, #0f1a2e 100%);
+            color: #ffb3d9;
+            padding: 20px;
+            font-size: 14px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            color: #b3d9ff;
+            text-shadow: 0 0 20px rgba(179, 217, 255, 0.6);
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #ffccf2;
+            margin-bottom: 20px;
+            font-size: 12px;
+        }
+
+        .section {
+            background: linear-gradient(135deg, rgba(255, 179, 217, 0.05) 0%, rgba(179, 217, 255, 0.05) 100%);
+            border: 2px solid rgba(255, 179, 217, 0.3);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .section-title {
+            color: #ffb3d9;
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.active {
+            background: linear-gradient(135deg, #ffb3d9, #b3d9ff);
+            box-shadow: 0 0 10px rgba(255, 179, 217, 0.6);
+        }
+
+        .status-indicator.error {
+            background: #ff6b9d;
+            box-shadow: 0 0 10px rgba(255, 107, 157, 0.6);
+        }
+
+        .status-indicator.idle {
+            background: #666;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .info-item {
+            background: rgba(255, 179, 217, 0.05);
+            padding: 10px;
+            border-radius: 8px;
+            border-left: 3px solid #ffb3d9;
+        }
+
+        .info-label {
+            color: #b3b3cc;
+            font-size: 11px;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            color: #ffb3d9;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .info-value.warning {
+            color: #ffd699;
+        }
+
+        .info-value.error {
+            color: #ff6b9d;
+        }
+
+        .log-container {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 179, 217, 0.2);
+            border-radius: 8px;
+            height: 250px;
+            overflow-y: auto;
+            padding: 10px;
+            font-size: 11px;
+        }
+
+        .log-entry {
+            margin-bottom: 3px;
+            padding: 3px;
+            border-radius: 3px;
+        }
+
+        .log-entry.info {
+            color: #b3d9ff;
+        }
+
+        .log-entry.warning {
+            color: #ffd699;
+            background: rgba(255, 214, 153, 0.1);
+        }
+
+        .log-entry.error {
+            color: #ff6b9d;
+            background: rgba(255, 107, 157, 0.1);
+        }
+
+        .log-entry.success {
+            color: #ffb3d9;
+        }
+
+        .log-time {
+            color: #666;
+            margin-right: 8px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: linear-gradient(135deg, #ffb3d9, #b3d9ff);
+            color: #1a0a1f;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            transition: all 0.3s;
+            font-size: 13px;
+            box-shadow: 0 4px 15px rgba(255, 179, 217, 0.3);
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(255, 179, 217, 0.5);
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .config-input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 179, 217, 0.3);
+            color: #ffb3d9;
+            padding: 8px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            margin-top: 5px;
+        }
+
+        .config-input:focus {
+            outline: none;
+            border-color: #ffb3d9;
+            box-shadow: 0 0 10px rgba(255, 179, 217, 0.3);
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 0;
+        }
+
+        .quality-bar {
+            height: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .quality-fill {
+            height: 100%;
+            background: linear-gradient(to right, #ff6b9d, #ffb3d9, #b3d9ff);
+            transition: width 0.3s;
+            box-shadow: 0 0 10px rgba(255, 179, 217, 0.5);
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #ffb3d9, #b3d9ff);
+            border-radius: 4px;
+        }
+
+        .optimization-badge {
+            display: inline-block;
+            background: #00ff00;
+            color: #000;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🔬 EVA DEBUG MONITOR</h1>
+        <div class="subtitle">
+            ✨ Otimizado: 24kHz Sample Rate | Buffer 9600 | Jitter Control | PCM16 Corrigido
+            <span class="optimization-badge">v2.0</span>
+        </div>
+
+        <div class="section">
+            <div class="section-title">⚙️ CONFIGURAÇÃO</div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">CPF</div>
+                    <input type="text" id="cpfInput" class="config-input" value="12345678900">
+                </div>
+                <div class="info-item">
+                    <div class="info-label">WebSocket URL</div>
+                    <input type="text" id="wsUrlInput" class="config-input"
+                        value="wss://eva-mind-sdk-909020604131.southamerica-east1.run.app/ws/pcm">
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" onclick="startEVA()">▶️ START</button>
+            <button id="stopBtn" onclick="stopEVA()" disabled>⏹️ STOP</button>
+            <button onclick="clearLogs()">🗑️ Clear</button>
+            <button onclick="exportLogs()">💾 Export</button>
+            <button onclick="toggleJitter()">🎚️ Toggle Jitter</button>
+        </div>
+
+        <div class="section">
+            <div class="section-title">
+                <span class="status-indicator" id="statusIndicator"></span>
+                📊 SYSTEM STATUS
+            </div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Estado</div>
+                    <div class="info-value" id="currentState">idle</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">WebSocket</div>
+                    <div class="info-value" id="wsStatus">disconnected</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Sample Rate (Capture)</div>
+                    <div class="info-value" id="captureSampleRate">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Sample Rate (Playback)</div>
+                    <div class="info-value" id="playbackSampleRate">-</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Jitter Buffer</div>
+                    <div class="info-value" id="jitterStatus">desabilitado</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Uptime</div>
+                    <div class="info-value" id="uptime">0s</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">🎤 AUDIO METRICS</div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Pacotes Enviados</div>
+                    <div class="metric-value" id="audioSent">0</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Pacotes Recebidos</div>
+                    <div class="metric-value" id="audioReceived">0</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Taxa de Envio</div>
+                    <div class="info-value" id="sendRate">0 pkt/s</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Taxa de Recepção</div>
+                    <div class="info-value" id="receiveRate">0 pkt/s</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">SNR Médio</div>
+                    <div class="info-value" id="avgSNR">-</div>
+                    <div class="quality-bar">
+                        <div class="quality-fill" id="snrBar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">Volume Médio</div>
+                    <div class="info-value" id="avgVolume">-</div>
+                    <div class="quality-bar">
+                        <div class="quality-fill" id="volumeBar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">📝 EVENT LOG</div>
+            <div class="log-container" id="logContainer"></div>
+        </div>
+    </div>
+
+    <script>
+        // ============ CONFIGURAÇÕES OTIMIZADAS ============
+        const TARGET_SAMPLE_RATE = 24000; // ✅ CRÍTICO: 24kHz
+        const MIN_BUFFER_SIZE = 9600;     // ✅ CRÍTICO: 400ms buffer
+        const JITTER_BUFFER_SIZE = 3;     // ✅ 3 pacotes
+        const CAPTURE_CHUNK_SIZE = 2400;  // 100ms @ 24kHz
+
+        // Estado global
+        let ws = null;
+        let audioContext = null;
+        let scriptProcessor = null;
+        let mediaStream = null;
+        let playbackContext = null;
+        let isActive = false;
+        let audioSentCount = 0;
+        let audioReceivedCount = 0;
+        let currentState = 'idle';
+        let startTime = null;
+        let lastSentCount = 0;
+        let lastReceivedCount = 0;
+
+        // ✅ Jitter Buffer
+        let jitterBuffer = [];
+        let jitterBufferEnabled = true;
+        let jitterBufferReady = false;
+
+        // ✅ Quality Metrics
+        let snrHistory = [];
+        let volumeHistory = [];
+
+        // Playback queue
+        let playbackQueue = [];
+        let isPlaying = false;
+        let playbackScheduledTime = 0;
+
+        // ============ LOGGING ============
+        function log(message, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.innerHTML = `<span class="log-time">${time}</span>${message}`;
+            const container = document.getElementById('logContainer');
+            container.appendChild(logEntry);
+            container.scrollTop = container.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+            log('Logs limpos', 'info');
+        }
+
+        function exportLogs() {
+            const logs = document.getElementById('logContainer').innerText;
+            const blob = new Blob([logs], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `eva-debug-${Date.now()}.txt`;
+            a.click();
+            log('Logs exportados', 'success');
+        }
+
+        function toggleJitter() {
+            jitterBufferEnabled = !jitterBufferEnabled;
+            jitterBuffer = [];
+            jitterBufferReady = false;
+            log(`Jitter Buffer: ${jitterBufferEnabled ? 'ATIVADO' : 'DESATIVADO'}`, 'info');
+            updateUI();
+        }
+
+        // ============ UI UPDATES ============
+        function updateUI() {
+            document.getElementById('currentState').textContent = currentState;
+            document.getElementById('statusIndicator').className = `status-indicator ${currentState}`;
+            document.getElementById('wsStatus').textContent = ws ?
+                (ws.readyState === WebSocket.OPEN ? '✅ connected' : '❌ disconnected') : 'offline';
+            document.getElementById('captureSampleRate').textContent =
+                audioContext ? `${audioContext.sampleRate}Hz` : '-';
+            document.getElementById('playbackSampleRate').textContent =
+                playbackContext ? `${playbackContext.sampleRate}Hz` : '-';
+            document.getElementById('jitterStatus').textContent =
+                jitterBufferEnabled ? `✅ ativo (${jitterBuffer.length}/${JITTER_BUFFER_SIZE})` : '❌ desabilitado';
+            document.getElementById('audioSent').textContent = audioSentCount;
+            document.getElementById('audioReceived').textContent = audioReceivedCount;
+
+            // Taxas
+            const sentRate = audioSentCount - lastSentCount;
+            const receivedRate = audioReceivedCount - lastReceivedCount;
+            document.getElementById('sendRate').textContent = `${sentRate} pkt/s`;
+            document.getElementById('receiveRate').textContent = `${receivedRate} pkt/s`;
+            lastSentCount = audioSentCount;
+            lastReceivedCount = audioReceivedCount;
+
+            // Quality metrics
+            if (snrHistory.length > 0) {
+                const avgSNR = snrHistory.reduce((a, b) => a + b, 0) / snrHistory.length;
+                document.getElementById('avgSNR').textContent = `${avgSNR.toFixed(1)}%`;
+                document.getElementById('avgSNR').className = avgSNR < 10 ? 'info-value error' : 'info-value';
+                document.getElementById('snrBar').style.width = `${Math.min(avgSNR, 100)}%`;
+            }
+
+            if (volumeHistory.length > 0) {
+                const avgVol = volumeHistory.reduce((a, b) => a + b, 0) / volumeHistory.length;
+                document.getElementById('avgVolume').textContent = `${avgVol.toFixed(0)}`;
+                document.getElementById('avgVolume').className = avgVol < 1000 ? 'info-value warning' : 'info-value';
+                document.getElementById('volumeBar').style.width = `${Math.min(avgVol / 100, 100)}%`;
+            }
+
+            // Uptime
+            if (startTime) {
+                const uptime = Math.floor((Date.now() - startTime) / 1000);
+                document.getElementById('uptime').textContent = `${uptime}s`;
+            }
+        }
+
+        // ✅ ANÁLISE DE QUALIDADE
+        function analyzeAudioQuality(pcm16) {
+            const samples = new Int16Array(pcm16);
+            let sum = 0;
+            let max = 0;
+
+            for (let i = 0; i < samples.length; i++) {
+                const abs = Math.abs(samples[i]);
+                sum += abs;
+                max = Math.max(max, abs);
+            }
+
+            const avg = sum / samples.length;
+            const snr = max > 0 ? (avg / max) * 100 : 0;
+
+            snrHistory.push(snr);
+            volumeHistory.push(max);
+            if (snrHistory.length > 30) {
+                snrHistory.shift();
+                volumeHistory.shift();
+            }
+
+            if (snr < 10) {
+                log(`⚠️ SNR baixo: ${snr.toFixed(1)}% - possível chiado`, 'warning');
+            }
+            if (max < 1000) {
+                log(`⚠️ Volume muito baixo: ${max}`, 'warning');
+            }
+        }
+
+        // ============ WEBSOCKET ============
+        function connectWebSocket() {
+            return new Promise((resolve, reject) => {
+                const wsUrl = document.getElementById('wsUrlInput').value;
+                log(`🔌 Conectando: ${wsUrl}`, 'info');
+
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    log('✅ WebSocket CONECTADO!', 'success');
+                    resolve();
+                };
+
+                ws.onmessage = handleWebSocketMessage;
+
+                ws.onerror = () => {
+                    log('❌ WebSocket ERROR', 'error');
+                    reject(new Error('WebSocket error'));
+                };
+
+                ws.onclose = (event) => {
+                    log(`WebSocket FECHADO: ${event.code}`, 'warning');
+                    if (isActive) {
+                        cleanup();
+                    }
+                };
+            });
+        }
+
+        function handleWebSocketMessage(event) {
+            if (typeof event.data === 'string') {
+                try {
+                    const msg = JSON.parse(event.data);
+                    log(`📨 MSG: ${msg.type}`, 'info');
+
+                    if (msg.type === 'registered') {
+                        currentState = 'registered';
+                    } else if (msg.type === 'session_created') {
+                        currentState = 'session_created';
+                    } else if (msg.type === 'error') {
+                        log(`❌ Erro: ${msg.error}`, 'error');
+                    }
+                } catch (e) {
+                    log(`Erro JSON: ${e.message}`, 'error');
+                }
+                return;
+            }
+
+            if (event.data instanceof Blob) {
+                audioReceivedCount++;
+                event.data.arrayBuffer().then(buffer => {
+                    analyzeAudioQuality(buffer);
+                    playAudio(buffer);
+                });
+            }
+        }
+
+        // ============ AUDIO CAPTURE ============
+        async function initializeAudio() {
+            log('🎤 Solicitando microfone...', 'info');
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: TARGET_SAMPLE_RATE, // ✅ 24kHz
+                        channelCount: 1
+                    }
+                });
+                log('✅ Microfone obtido', 'success');
+            } catch (err) {
+                log(`❌ Microfone bloqueado: ${err.message}`, 'error');
+                throw err;
+            }
+
+            audioContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE }); // ✅ 24kHz
+            await audioContext.resume();
+            log(`✅ AudioContext @ ${audioContext.sampleRate}Hz`, 'success');
+
+            const source = audioContext.createMediaStreamSource(mediaStream);
+            const bufferSize = 4096;
+            scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+            let buffer = [];
+
+            scriptProcessor.onaudioprocess = (e) => {
+                const inputData = e.inputBuffer.getChannelData(0);
+
+                for (let i = 0; i < inputData.length; i++) {
+                    buffer.push(inputData[i]);
+
+                    if (buffer.length >= CAPTURE_CHUNK_SIZE) {
+                        // ✅ Conversão PCM16 corrigida
+                        const pcm16 = new Int16Array(CAPTURE_CHUNK_SIZE);
+                        for (let j = 0; j < CAPTURE_CHUNK_SIZE; j++) {
+                            const s = Math.max(-1, Math.min(1, buffer[j]));
+                            pcm16[j] = s * (s < 0 ? 0x8000 : 0x7FFF);
+                        }
+
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(pcm16.buffer);
+                            audioSentCount++;
+                        }
+
+                        buffer = [];
+                    }
+                }
+            };
+
+            source.connect(scriptProcessor);
+            scriptProcessor.connect(audioContext.destination);
+
+            log('✅ Sistema de áudio COMPLETO!', 'success');
+        }
+
+        // ✅ AUDIO PLAYBACK COM JITTER BUFFER
+        async function playAudio(pcm16Buffer) {
+            if (!playbackContext) {
+                playbackContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE }); // ✅ 24kHz
+                await playbackContext.resume();
+                playbackScheduledTime = playbackContext.currentTime;
+                log(`🔊 Playback @ ${playbackContext.sampleRate}Hz`, 'info');
+            }
+
+            const pcm16 = new Int16Array(pcm16Buffer);
+            const float32 = new Float32Array(pcm16.length);
+
+            // ✅ Conversão PCM16→Float32 corrigida (divisão simétrica)
+            for (let i = 0; i < pcm16.length; i++) {
+                float32[i] = pcm16[i] / 32768.0;
+            }
+
+            const audioBuffer = playbackContext.createBuffer(1, float32.length, playbackContext.sampleRate);
+            audioBuffer.getChannelData(0).set(float32);
+
+            if (jitterBufferEnabled) {
+                jitterBuffer.push(audioBuffer);
+
+                if (!jitterBufferReady && jitterBuffer.length >= JITTER_BUFFER_SIZE) {
+                    jitterBufferReady = true;
+                    log('✅ Jitter buffer PRONTO', 'success');
+                }
+
+                if (jitterBufferReady && jitterBuffer.length > 0) {
+                    const bufferToPlay = jitterBuffer.shift();
+                    schedulePlayback(bufferToPlay);
+                }
+            } else {
+                schedulePlayback(audioBuffer);
+            }
+        }
+
+        function schedulePlayback(audioBuffer) {
+            const source = playbackContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(playbackContext.destination);
+
+            const currentTime = playbackContext.currentTime;
+            const startTime = Math.max(currentTime, playbackScheduledTime);
+
+            source.start(startTime);
+            playbackScheduledTime = startTime + audioBuffer.duration;
+        }
+
+        // ============ MAIN FUNCTIONS ============
+        async function startEVA() {
+            const cpf = document.getElementById('cpfInput').value;
+            if (!cpf || cpf.length < 11) {
+                alert('Digite um CPF válido!');
+                return;
+            }
+
+            log('🚀 INICIANDO EVA (MODO OTIMIZADO)', 'success');
+            startTime = Date.now();
+
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+
+            try {
+                currentState = 'connecting';
+                await connectWebSocket();
+
+                const registerMsg = { type: 'register', cpf: cpf };
+                ws.send(JSON.stringify(registerMsg));
+                log('📤 REGISTER enviado', 'info');
+
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                const sessionID = 'web-' + Date.now();
+                const callMsg = { type: 'start_call', cpf: cpf, session_id: sessionID };
+                ws.send(JSON.stringify(callMsg));
+                log('📤 START_CALL enviado', 'info');
+
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                await initializeAudio();
+
+                isActive = true;
+                currentState = 'active';
+                log('✅ EVA PRONTA! 💚', 'success');
+
+            } catch (err) {
+                log(`❌ ERRO: ${err.message}`, 'error');
+                currentState = 'error';
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+            }
+        }
+
+        function stopEVA() {
+            log('🛑 Parando EVA...', 'warning');
+            if (ws) {
+                ws.send(JSON.stringify({ type: 'hangup' }));
+                ws.close();
+            }
+            cleanup();
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+        }
+
+        function cleanup() {
+            isActive = false;
+            startTime = null;
+
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(t => t.stop());
+                mediaStream = null;
+            }
+
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            if (playbackContext) {
+                playbackContext.close();
+                playbackContext = null;
+            }
+
+            ws = null;
+            audioSentCount = 0;
+            audioReceivedCount = 0;
+            currentState = 'idle';
+            jitterBuffer = [];
+            jitterBufferReady = false;
+            snrHistory = [];
+            volumeHistory = [];
+
+            updateUI();
+            log('✅ Cleanup completo', 'success');
+        }
+
+        // Update UI periodically
+        setInterval(updateUI, 1000);
+        updateUI();
+
+        log('🔬 Debug Monitor OTIMIZADO inicializado', 'success');
+        log('✨ Melhorias: 24kHz | Buffer 9600 | Jitter | PCM16 corrigido', 'info');
+    </script>
+</body>
+
+</html>

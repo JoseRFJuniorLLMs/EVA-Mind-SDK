@@ -27,6 +27,7 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
+// ✅ OTIMIZADO: Adicionado buffer de áudio e mutex
 type WebSocketSession struct {
 	ID           string
 	CPF          string
@@ -37,6 +38,10 @@ type WebSocketSession struct {
 	cancel       context.CancelFunc
 	lastActivity time.Time
 	mu           sync.RWMutex
+
+	// ✅ NOVO: Buffer de áudio para envio em chunks maiores
+	audioBuffer []byte
+	audioMutex  sync.Mutex
 }
 
 type SignalingServer struct {
@@ -104,11 +109,11 @@ func (s *SignalingServer) handleControlMessage(conn *websocket.Conn, message []b
 
 	switch msg.Type {
 	case "register":
-		log.Printf("═══════════════════════════════════════════════════════")
-		log.Printf("📥 MENSAGEM DE REGISTRO RECEBIDA")
+		log.Printf("╔══════════════════════════════════════════════════════╗")
+		log.Printf("🔥 MENSAGEM DE REGISTRO RECEBIDA")
 		log.Printf("📋 CPF: %s", msg.CPF)
-		log.Printf("═══════════════════════════════════════════════════════")
-		
+		log.Printf("╚══════════════════════════════════════════════════════╝")
+
 		idoso, err := s.getIdosoByCPF(msg.CPF)
 		if err != nil {
 			log.Printf("❌ ERRO: CPF não encontrado no banco de dados: %s", msg.CPF)
@@ -116,7 +121,7 @@ func (s *SignalingServer) handleControlMessage(conn *websocket.Conn, message []b
 			s.sendError(conn, "CPF não encontrado")
 			return currentSession
 		}
-		
+
 		log.Printf("✅ CPF encontrado no banco de dados!")
 		log.Printf("👤 Idoso ID: %d, Nome: %s", idoso.ID, idoso.Nome)
 
@@ -127,14 +132,14 @@ func (s *SignalingServer) handleControlMessage(conn *websocket.Conn, message []b
 			Type:    "registered",
 			Success: true,
 		}
-		
-		log.Printf("═══════════════════════════════════════════════════════")
+
+		log.Printf("╔══════════════════════════════════════════════════════╗")
 		log.Printf("📤 ENVIANDO MENSAGEM 'registered' PARA O CLIENTE")
 		log.Printf("📦 Payload: %+v", registeredMsg)
-		log.Printf("═══════════════════════════════════════════════════════")
-		
+		log.Printf("╚══════════════════════════════════════════════════════╝")
+
 		s.sendMessage(conn, registeredMsg)
-		
+
 		log.Printf("✅ Mensagem 'registered' enviada com sucesso!")
 		log.Printf("👤 Cliente registrado: %s", msg.CPF)
 
@@ -171,6 +176,8 @@ func (s *SignalingServer) handleControlMessage(conn *websocket.Conn, message []b
 
 	case "hangup":
 		if currentSession != nil {
+			// ✅ NOVO: Enviar buffer restante antes de fechar
+			s.flushAudioBuffer(currentSession)
 			s.cleanupSession(currentSession.ID)
 		}
 		return nil
@@ -217,10 +224,10 @@ func (s *SignalingServer) audioGeminiToClient(session *WebSocketSession) {
 
 func (s *SignalingServer) handleGeminiResponse(session *WebSocketSession, response map[string]interface{}) {
 	// ✅ LOG: Mostrar resposta completa do Gemini
-	log.Printf("📥 [GEMINI RESPONSE] Tipo de resposta recebida")
+	log.Printf("🔥 [GEMINI RESPONSE] Tipo de resposta recebida")
 
 	if setupComplete, ok := response["setupComplete"].(bool); ok && setupComplete {
-		log.Printf("✅ [GEMINI] Setup completo")
+		log.Printf("✅ [GEMINI] Setup completo @ 24kHz PCM16")
 		return
 	}
 
@@ -233,7 +240,7 @@ func (s *SignalingServer) handleGeminiResponse(session *WebSocketSession, respon
 
 	log.Printf("📦 [GEMINI] serverContent recebido, processando...")
 
-	// ========== TRANSCRIÇÃO NATIVA (NOVO) ==========
+	// ========== TRANSCRIÇÃO NATIVA ==========
 	// Capturar transcrição do USUÁRIO (input audio)
 	if inputTrans, ok := serverContent["inputAudioTranscription"].(map[string]interface{}); ok {
 		if userText, ok := inputTrans["text"].(string); ok && userText != "" {
@@ -279,7 +286,7 @@ func (s *SignalingServer) handleGeminiResponse(session *WebSocketSession, respon
 			continue
 		}
 
-		// Processar áudio da EVA
+		// ✅ OTIMIZADO: Processar áudio da EVA com buffer
 		if inlineData, ok := partMap["inlineData"].(map[string]interface{}); ok {
 			mimeType, _ := inlineData["mimeType"].(string)
 			audioB64, _ := inlineData["data"].(string)
@@ -293,8 +300,17 @@ func (s *SignalingServer) handleGeminiResponse(session *WebSocketSession, respon
 					continue
 				}
 
-				log.Printf("🎶 [AUDIO] Enviando %d bytes de áudio para o cliente", len(audioData))
-				session.WSConn.WriteMessage(websocket.BinaryMessage, audioData)
+				// ✅ NOVO: Validação de tamanho mínimo
+				if len(audioData) < 100 {
+					log.Printf("⚠️ [AUDIO] Chunk muito pequeno (%d bytes), acumulando no buffer", len(audioData))
+					s.bufferAudio(session, audioData)
+					continue
+				}
+
+				log.Printf("🎶 [AUDIO] Recebido chunk de %d bytes @ 24kHz PCM16", len(audioData))
+
+				// ✅ NOVO: Usar sistema de buffer inteligente
+				s.bufferAudio(session, audioData)
 			}
 		}
 
@@ -303,6 +319,50 @@ func (s *SignalingServer) handleGeminiResponse(session *WebSocketSession, respon
 			log.Printf("🔧 [GEMINI] Function call detectado")
 			s.executeTool(session, fnCall)
 		}
+	}
+}
+
+// ✅ NOVO: Sistema de buffer inteligente para áudio
+func (s *SignalingServer) bufferAudio(session *WebSocketSession, audioData []byte) {
+	session.audioMutex.Lock()
+	defer session.audioMutex.Unlock()
+
+	// Acumular no buffer
+	session.audioBuffer = append(session.audioBuffer, audioData...)
+
+	// ✅ CRÍTICO: Tamanho mínimo do buffer = 9600 bytes (400ms @ 24kHz)
+	const MIN_BUFFER_SIZE = 9600
+
+	// Enviar quando buffer atingir tamanho mínimo
+	if len(session.audioBuffer) >= MIN_BUFFER_SIZE {
+		chunk := make([]byte, len(session.audioBuffer))
+		copy(chunk, session.audioBuffer)
+
+		log.Printf("🎶 [AUDIO] Enviando chunk buffered de %d bytes para cliente", len(chunk))
+
+		err := session.WSConn.WriteMessage(websocket.BinaryMessage, chunk)
+		if err != nil {
+			log.Printf("❌ [AUDIO] Erro ao enviar: %v", err)
+		} else {
+			log.Printf("✅ [AUDIO] Chunk enviado com sucesso")
+		}
+
+		// Limpar buffer após envio
+		session.audioBuffer = nil
+	} else {
+		log.Printf("📊 [AUDIO] Buffer acumulando: %d/%d bytes", len(session.audioBuffer), MIN_BUFFER_SIZE)
+	}
+}
+
+// ✅ NOVO: Enviar buffer restante antes de fechar sessão
+func (s *SignalingServer) flushAudioBuffer(session *WebSocketSession) {
+	session.audioMutex.Lock()
+	defer session.audioMutex.Unlock()
+
+	if len(session.audioBuffer) > 0 {
+		log.Printf("🔊 [AUDIO] Enviando buffer restante: %d bytes", len(session.audioBuffer))
+		session.WSConn.WriteMessage(websocket.BinaryMessage, session.audioBuffer)
+		session.audioBuffer = nil
 	}
 }
 
@@ -413,9 +473,12 @@ func (s *SignalingServer) createSession(sessionID, cpf string, idosoID int64, co
 		ctx:          ctx,
 		cancel:       cancel,
 		lastActivity: time.Now(),
+		audioBuffer:  make([]byte, 0, 19200), // ✅ Pre-alocado: 800ms @ 24kHz
 	}
 
 	s.sessions.Store(sessionID, session)
+
+	log.Printf("✅ Sessão criada com buffer de áudio otimizado (24kHz)")
 
 	return session, nil
 }
@@ -427,6 +490,10 @@ func (s *SignalingServer) cleanupSession(sessionID string) {
 	}
 
 	session := val.(*WebSocketSession)
+
+	// ✅ NOVO: Enviar buffer restante antes de limpar
+	s.flushAudioBuffer(session)
+
 	session.cancel()
 
 	if session.GeminiClient != nil {
@@ -621,14 +688,6 @@ func (s *SignalingServer) sendError(conn *websocket.Conn, errMsg string) {
 
 func BuildInstructions(idosoID int64, db *sql.DB) string {
 	// 1. QUERY EXAUSTIVA: Recuperar TODOS os campos relevantes da tabela 'idosos'
-	// Esquema fornecido: id, nome, data_nascimento, telefone, cpf, foto_url, intro_audio_url,
-	// nivel_cognitivo, limitacoes_auditivas, usa_aparelho_auditivo, limitacoes_visuais,
-	// mobilidade, tom_voz, preferencia_horario_ligacao, timezone, ganho_audio_entrada,
-	// ganho_audio_saida, ambiente_ruidoso, familiar_principal, contato_emergencia,
-	// medico_responsavel, medicamentos_atuais, condicoes_medicas, sentimento,
-	// agendamentos_pendentes, notas_gerais, ativo, criado_em, atualizado_em,
-	// endereco, medicamentos_regulares, device_token, device_token_valido, device_token_atualizado_em
-
 	query := `
 		SELECT 
 			nome, 
@@ -656,9 +715,9 @@ func BuildInstructions(idosoID int64, db *sql.DB) string {
 
 	var nome, nivelCognitivo, tomVoz, mobilidade string
 	var idade int
-	var limitacoesAuditivas, usaAparelhoAuditivo, ambienteRuidoso sql.NullBool // ✅ Podem ser NULL
+	var limitacoesAuditivas, usaAparelhoAuditivo, ambienteRuidoso sql.NullBool
 
-	// Campos que podem ser NULL (usando NullString para segurança)
+	// Campos que podem ser NULL
 	var limitacoesVisuais, preferenciaHorario, familiarPrincipal, contatoEmergencia, medicoResponsavel sql.NullString
 	var medicamentosAtuais, medicamentosRegulares, condicoesMedicas, sentimento, notasGerais, endereco sql.NullString
 
@@ -690,11 +749,11 @@ func BuildInstructions(idosoID int64, db *sql.DB) string {
 		return "Você é a EVA, assistente de saúde virtual. Fale em português de forma clara."
 	}
 
-	// 🔍 DEBUG EXAUSTIVO DOS DADOS RECUPERADOS
+	// 📝 DEBUG EXAUSTIVO DOS DADOS RECUPERADOS
 	log.Printf("📋 [DADOS PACIENTE] Nome: %s, Idade: %d", nome, idade)
 	log.Printf("   💊 Meds Atuais: %s", getString(medicamentosAtuais, "Nenhum"))
 	log.Printf("   💊 Meds Regulares: %s", getString(medicamentosRegulares, "Nenhum"))
-	log.Printf("   🏥 Condições: %s", getString(condicoesMedicas, "Nenhuma"))
+	log.Printf("   🥼 Condições: %s", getString(condicoesMedicas, "Nenhuma"))
 
 	// 2. Buscar Template Base
 	templateQuery := `SELECT template FROM prompt_templates WHERE nome = 'eva_base_v2' AND ativo = true LIMIT 1`
@@ -705,14 +764,12 @@ func BuildInstructions(idosoID int64, db *sql.DB) string {
 	}
 
 	// 3. Montar "Dossiê do Paciente" (Texto Completo)
-	// Isso garante que NENHUMA informação seja perdida, independente do template
-
-	dossier := fmt.Sprintf("\n\n📍 --- FICHA COMPLETA DO PACIENTE (INFORMAÇÃO CONFIDENCIAL) ---\n")
+	dossier := fmt.Sprintf("\n\n📋 --- FICHA COMPLETA DO PACIENTE (INFORMAÇÃO CONFIDENCIAL) ---\n")
 	dossier += fmt.Sprintf("NOME: %s\n", nome)
 	dossier += fmt.Sprintf("IDADE: %d anos\n", idade)
 	dossier += fmt.Sprintf("ENDEREÇO: %s\n", getString(endereco, "Não completado"))
 
-	dossier += "\n🏥 --- SAÚDE E CONDIÇÕES ---\n"
+	dossier += "\n🥼 --- SAÚDE E CONDIÇÕES ---\n"
 	dossier += fmt.Sprintf("Nível Cognitivo: %s\n", nivelCognitivo)
 	dossier += fmt.Sprintf("Mobilidade: %s\n", mobilidade)
 	dossier += fmt.Sprintf("Limitações Auditivas: %v (Usa Aparelho: %v)\n", limitacoesAuditivas, usaAparelhoAuditivo)
@@ -731,7 +788,7 @@ func BuildInstructions(idosoID int64, db *sql.DB) string {
 		if medsR != "" {
 			dossier += fmt.Sprintf("Regulares: %s\n", medsR)
 		}
-		dossier += "INSTRUCÃO: Se o paciente perguntar o que deve tomar, consulte esta lista.\n"
+		dossier += "INSTRUÇÃO: Se o paciente perguntar o que deve tomar, consulte esta lista.\n"
 	}
 
 	dossier += "\n📞 --- REDE DE APOIO ---\n"
@@ -746,14 +803,12 @@ func BuildInstructions(idosoID int64, db *sql.DB) string {
 	dossier += fmt.Sprintf("Tom de Voz Ideal: %s\n", tomVoz)
 	dossier += "--------------------------------------------------------\n"
 
-	// 4. Substituições no Template (para manter compatibilidade com tags existentes)
+	// 4. Substituições no Template
 	instructions := template
 	instructions = strings.ReplaceAll(instructions, "{{nome_idoso}}", nome)
 	instructions = strings.ReplaceAll(instructions, "{{idade}}", fmt.Sprintf("%d", idade))
 	instructions = strings.ReplaceAll(instructions, "{{nivel_cognitivo}}", nivelCognitivo)
 	instructions = strings.ReplaceAll(instructions, "{{tom_voz}}", tomVoz)
-
-	// Tags de dados (caso o template as use)
 	instructions = strings.ReplaceAll(instructions, "{{medicamentos}}", medsA+" "+medsR)
 	instructions = strings.ReplaceAll(instructions, "{{condicoes_medicas}}", getString(condicoesMedicas, ""))
 
@@ -763,7 +818,7 @@ func BuildInstructions(idosoID int64, db *sql.DB) string {
 		instructions = strings.ReplaceAll(instructions, tag, "")
 	}
 
-	// 5. ANEXAR DOSSIÊ AO FINAL (Garantia Absoluta)
+	// 5. ANEXAR DOSSIÊ AO FINAL
 	finalInstructions := instructions + dossier
 
 	log.Printf("✅ [BuildInstructions] Instruções finais geradas (%d chars)", len(finalInstructions))
